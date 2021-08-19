@@ -47,6 +47,7 @@ func SignDerData2RS(signDerData []byte) ([]byte, error){
 	return rs, nil
 }
 
+// []byte 数组合并
 func BytesCombine(pBytes ...[]byte) []byte {
 	len := len(pBytes)
 	s := make([][]byte, len)
@@ -55,3 +56,14 @@ func BytesCombine(pBytes ...[]byte) []byte {
 	}
 	return bytes.Join(s, []byte{})
 }
+
+// 查找[]string 列表中数据的位置
+func FindInSlice(slice []string, val string) (int, bool) {
+	for i, item := range slice {
+		if item == val {
+			return i, true
+		}
+	}
+	return -1, false
+}
+

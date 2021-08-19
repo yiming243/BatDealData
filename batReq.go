@@ -1,3 +1,16 @@
+/*
+流程有点繁琐，写个说明
+功能：
+	批量处理数据，数据可以按照一定数量，或者到一定时间后批量发送。
+实现原理：
+	1. 服务开启式，启动批量发送定时器，启动删除定时器。
+	2. 多线程业务时，业务进入到队列中，保存在 map->list 中，当发送一批数据后 map中这一批次
+       数据的批量号，放到删除队列中（延迟1秒放入）。
+	3. 删除定时器会定时1秒循环，当发现删除队列中有数据，则删除map中的这一项，循环结束后，清空删除队列。
+备注：
+	业务处理后续可以根据自己的需要自己调整。
+ */
+
 package main
 
 import (
@@ -9,14 +22,15 @@ import (
 )
 
 var (
-	MaxCount   = 10                			// 条进行打包
-	TimeSendPeriod = 10011111111            // 多少个时间单位(毫秒)
-	TimeDelPeriod = 3                       // 多少个时间单位(秒)
+	MaxCount   = 100               		    // 条进行打包
+	TimeSendPeriod = 10                     // 多少个时间单位(毫秒)
 	ReqMu      = new(sync.Mutex)            // 请求数据锁
 	GBatReqMap = make(map[string]BatchReq)  // 保存所有请求信息，以及返回信息（返回信息会定期清理）
 	GBatReq BatchReq                        // 当前操作的map对象的一个数据
 	MapKey     = ""                         // 保存当前处理GBatReq 的key值
 
+	GDelList   = make([]string,0)           // 删除列表
+	DelMu      = new(sync.Mutex)            // 删除数据锁
 )
 
 type BatchReq struct{
@@ -56,22 +70,37 @@ func ReqToQueue(req *ReqResInfo) {
 
 	if GBatReq.TotalCount >= int16(MaxCount) {
 		fmt.Println("到MaxCount了，开始发送一批")
-
 		// 放入map中
 		GBatReqMap[MapKey]  = GBatReq
 		//重置
 		MapKey = ""
+
 		go sendReq(GBatReq)
-		go TimeDelService(GBatReq.BatchNumber)
 	}
 }
 
-func TimeDelService(key string) {
-	time.Sleep(time.Second  * time.Duration(TimeDelPeriod))
-	ReqMu.Lock()
-	delete(GBatReqMap, key)
-	fmt.Printf("len(GBatReqMap) count:%v, key:%v\n", len(GBatReqMap), key)
-	ReqMu.Unlock()
+// 定时删除已处理数据
+func TimeDelService() {
+	for{
+		time.Sleep(time.Second * time.Duration(1))
+
+		if len(GDelList) <= 0 {
+			continue
+		}
+
+		DelMu.Lock()
+		ReqMu.Lock()
+
+		for _, v := range GDelList{
+			delete(GBatReqMap, v)
+		}
+		//fmt.Printf("len(GBatReqMap) count:%v, key:%v\n", len(GBatReqMap), "")
+		GDelList = GDelList[:0] // 清空
+
+		ReqMu.Unlock()
+		DelMu.Unlock()
+	}
+
 }
 
 // 请求数组转换为buf
@@ -109,7 +138,6 @@ func ResBufToStruct(resBuf []byte, res []*ReqResInfo) error {
 		//RetSign, err := SignDerData2RS(dst[8:(8+sigLen)])
 
 		RetSign := []byte("1111222")
-
 		res[index].RetSign <- string(RetSign[:])
 	}
 	return nil
@@ -117,7 +145,8 @@ func ResBufToStruct(resBuf []byte, res []*ReqResInfo) error {
 
 // 定时发送数据
 func sendReq(batReq BatchReq) error {
-
+	//SendMu.Lock()
+	//defer SendMu.Lock()
 
 	reqByte := ReqStructToBuf(batReq.ReqList)
 	//fmt.Printf("reqByte:%v\n", reqByte)
@@ -128,6 +157,9 @@ func sendReq(batReq BatchReq) error {
 		return err
 	}
 
+	// 处理完毕后，将此批数据的批次号写入到待删除列表中
+	go writeDelSignal(batReq.BatchNumber)
+
 	fmt.Printf("\nlen(GBatReqMap) begin:%v\n", len(GBatReqMap))
 
 	//for index, value := range batReq {
@@ -137,6 +169,16 @@ func sendReq(batReq BatchReq) error {
 
 	return err
 }
+
+// 将此批数据的批次号写入到待删除列表中
+func writeDelSignal(key string){
+	time.Sleep(time.Second * time.Duration(1))
+
+	DelMu.Lock()
+	defer DelMu.Unlock()
+	GDelList = append(GDelList, key)
+}
+
 
 func FindArrIndex(seqNum int16, res []*ReqResInfo) (int, error){
 	for i,v := range res{
@@ -156,10 +198,14 @@ func TimeService() {
 
 		ReqMu.Lock()
 
-		if GBatReq.TotalCount > 0 {
+		if GBatReq.TotalCount > 0 && len(MapKey) > 0 {
 			fmt.Printf("定时发送%d\n", GBatReq.TotalCount)
-			batchReq := GBatReqMap[MapKey]
-			go sendReq(batchReq)
+
+			// 放入map中
+			GBatReqMap[MapKey]  = GBatReq
+			//重置
+			MapKey = ""
+			go sendReq(GBatReq)
 		}
 
 		ReqMu.Unlock()

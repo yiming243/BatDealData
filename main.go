@@ -22,9 +22,9 @@ func workThread(index int, hashData string) (string, error) {
 }
 
 func main() {
-
 	// 开启定时处理任务
-	//go TimeService()
+	go TimeService()
+	go TimeDelService()
 
 	for i := 0; i < 10000; i++ {
 		// 模拟，正常情况会判断返回值等等
@@ -33,5 +33,6 @@ func main() {
 
 	time.Sleep(time.Second * 1111111)
 	fmt.Println("over")
+
 }
 
