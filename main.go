@@ -8,16 +8,15 @@ import (
 )
 
 func workThread(index int, hashData string) (string, error) {
-	SignRes := make(chan string)
+	req := ReqResInfo{KeyIndex: int32(index), HashData:hashData, RetSign:make(chan string)}
 
-	req := ReqInfo{KeyIndex: index, HashData: hashData, RetSign: SignRes}
-	go ReqToQueue(req)
+	go ReqToQueue(&req)
 
-	if msg, ok := <-SignRes; ok {
-		fmt.Printf("msg:%v, index:%v\n", msg, index)
+	if msg, ok := <-req.RetSign; ok {
+		fmt.Printf("index:%v, req.index:%v, sign:%v, \n",  index, req.KeyIndex, msg)
 	}
 
-	close(SignRes)
+	close(req.RetSign)
 
 	return "", nil
 }
@@ -25,14 +24,14 @@ func workThread(index int, hashData string) (string, error) {
 func main() {
 
 	// 开启定时处理任务
-	go TimeService()
+	//go TimeService()
 
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 10000; i++ {
 		// 模拟，正常情况会判断返回值等等
 		go workThread(i, strconv.Itoa(i))
 	}
 
-	time.Sleep(time.Second * 11)
+	time.Sleep(time.Second * 1111111)
 	fmt.Println("over")
 }
 
